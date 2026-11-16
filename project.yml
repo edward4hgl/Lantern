@@ -1,0 +1,43 @@
+name: Lantern
+options:
+  bundleIdPrefix: app.lantern
+  createIntermediateGroups: true
+  groupSortPosition: top
+  deploymentTarget:
+    iOS: "16.6"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    IPHONEOS_DEPLOYMENT_TARGET: "16.6"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_BITCODE: NO
+    DEAD_CODE_STRIPPING: YES
+
+targets:
+  Lantern:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.6"
+    sources:
+      - path: Lantern
+        excludes:
+          - "Info.plist"
+    settings:
+      base:
+        PRODUCT_NAME: Lantern
+        PRODUCT_BUNDLE_IDENTIFIER: app.lantern.slides
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: Lantern/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        DEVELOPMENT_TEAM: ""               # 填自己的 Team ID；留空则每次 xcodegen 后要在 Xcode 里重选一次
+        CODE_SIGN_STYLE: Automatic
+    scheme:
+      testTargets: []
