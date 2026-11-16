@@ -24,3 +24,7 @@ Thumbs.db
 .vscode/
 *.swp
 desktop.ini
+
+# 脚本临时输出
+publish.log
+__pycache__/
