@@ -1,0 +1,143 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: "用 Secrets 里的证书给 ipa 签名"
+        type: boolean
+        default: false
+
+jobs:
+  lint:
+    name: 源码体检
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pillow numpy
+      - name: 结构校验
+        run: python tools/swift_lint.py
+      - name: 图标可重建
+        run: python tools/make_icon.py
+
+  build:
+    name: 编译 + 打包 ipa
+    runs-on: macos-15
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 选择 Xcode
+        run: |
+          # 用 runner 上最新的正式版 Xcode；找不到就用默认的
+          LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$LATEST" ]; then sudo xcode-select -switch "$LATEST"; fi
+          xcodebuild -version
+
+      - name: 安装 XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: 生成工程
+        run: xcodegen generate
+
+      - name: 模拟器编译（真正的编译检查）
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Lantern.xcodeproj \
+            -scheme Lantern \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            -derivedDataPath build-sim \
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=NO \
+            | tee sim-build.log
+          grep -E "error:|warning:" sim-build.log | sort -u | head -60 || true
+
+      - name: 真机构建（不签名）
+        run: |
+          xcodebuild build \
+            -project Lantern.xcodeproj \
+            -scheme Lantern \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath build-device \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            ENABLE_BITCODE=NO
+
+      - name: 组装未签名 ipa
+        run: |
+          APP="build-device/Build/Products/Release-iphoneos/Lantern.app"
+          test -d "$APP"
+          rm -rf out && mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          # 未签名的包不需要 _CodeSignature，去掉更干净
+          rm -rf out/Payload/Lantern.app/_CodeSignature
+          cd out && zip -qry ../Lantern-unsigned.ipa Payload
+          cd ..
+          ls -lh Lantern-unsigned.ipa
+          shasum -a 256 Lantern-unsigned.ipa | tee Lantern-unsigned.ipa.sha256
+
+      - name: 用证书签名（可选）
+        if: ${{ inputs.sign == true }}
+        env:
+          P12_BASE64: ${{ secrets.P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          MOBILEPROVISION_BASE64: ${{ secrets.MOBILEPROVISION_BASE64 }}
+        run: |
+          if [ -z "$P12_BASE64" ]; then
+            echo "没有配置 P12_BASE64，跳过签名"; exit 0
+          fi
+          KEYCHAIN=$RUNNER_TEMP/sign.keychain-db
+          security create-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings -lut 1800 "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          echo "$P12_BASE64" | base64 -d > /tmp/cert.p12
+          security import /tmp/cert.p12 -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k "" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "$MOBILEPROVISION_BASE64" | base64 -d > /tmp/profile.mobileprovision
+          cp /tmp/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+
+          rm -rf signed && mkdir -p signed && cd signed
+          unzip -q ../Lantern-unsigned.ipa
+          ENT=$(mktemp /tmp/ent.XXXX.plist)
+          security cms -D -i /tmp/profile.mobileprovision > /tmp/profile.plist
+          /usr/libexec/PlistBuddy -x -c 'Print :Entitlements' /tmp/profile.plist > "$ENT"
+          codesign --force --sign "Apple Distribution" --entitlements "$ENT" \
+            --timestamp=none Payload/Lantern.app
+          zip -qry ../Lantern-signed.ipa Payload
+          cd ..
+          shasum -a 256 Lantern-signed.ipa | tee Lantern-signed.ipa.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lantern-ios
+          path: |
+            Lantern-unsigned.ipa
+            Lantern-unsigned.ipa.sha256
+            Lantern-signed.ipa
+            Lantern-signed.ipa.sha256
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: 编译诊断（失败时）
+        if: failure()
+        run: |
+          find build-sim build-device -name "*.xcactivitylog" -o -name "*.dia" 2>/dev/null | head -20
+          ls -la build-sim/Logs/Build 2>/dev/null || true
