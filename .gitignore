@@ -1,0 +1,26 @@
+# XcodeGen 生成物
+*.xcodeproj/
+*.xcworkspace/
+
+# 构建产物
+build/
+build-sim/
+build-device/
+DerivedData/
+out/
+
+# ipa / 签名物料
+*.ipa
+*.p12
+*.mobileprovision
+*.keychain-db
+!*.ipa.sha256
+
+# 系统垃圾
+.DS_Store
+Thumbs.db
+
+# 编辑器
+.vscode/
+*.swp
+desktop.ini
