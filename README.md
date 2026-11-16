@@ -115,7 +115,9 @@ open Lantern.xcodeproj      # 直接 ⌘R，签名已经配好
 
 ### 没有 Mac：GitHub Actions
 
-推上 GitHub 后 `.github/workflows/build.yml` 会做三件事：
+CI 定义在 `.github/workflows/build.yml`；本仓库里同时留了一份同内容的 `ci/build.yml`
+（推送用的 token 没有 workflow 权限，所以先落在 `ci/`）。把它复制成
+`.github/workflows/build.yml` 提交一次就启用了。它会做三件事：
 
 1. `lint` job（ubuntu）：跑 `tools/swift_lint.py` 和 `tools/make_icon.py`，保证源码结构和新图标可重现；
 2. `build` job（macos-15）：`xcodegen generate` → 模拟器编译（**真正的编译检查**）→
@@ -125,23 +127,21 @@ open Lantern.xcodeproj      # 直接 ⌘R，签名已经配好
 
 产物在 Actions 页面的 Artifacts 里。
 
-## 装到 iPad 的三条通道
+## 装到 iPad
 
-| 通道 | 前提 | 有效期 |
-| --- | --- | --- |
-| **TrollStore** | iPadOS ≤ 17.0，且装过 TrollStore | 永久 |
-| **SideStore / AltStore** | 一台能装 SideStore 的设备 + Apple ID | 7 天自动续签 |
-| **免费证书 + 数据线** | Xcode（或 `repack.py sign`） | 7 天，到期重装 |
+签名和分发这一步不在这儿写。手上有一个可安装的 `Lantern.ipa` 就行——证书怎么来、
+用哪个工具签、装上去之后多久到期，取决于你自己的开发者账号和安装方式。
 
-自用最省事的是第二条：装一次 SideStore，把 `Lantern.ipa` 丢进去，它会在 7 天内替你自动续签，
-iPad 不用连电脑。**付费开发者账号（$99/年）**签出来的证书能撑一年，也可以直接走第一条之外的
-「Ad Hoc + 一年证书」组合，到期前重新签一次。
-
-拿到的未签名 ipa 用 [zsign](https://github.com/zhlynn/zsign) 签：
+不签名构建出 ipa：
 
 ```bash
-zsign -k cert.p12 -p 密码 -m profile.mobileprovision \
-      -o Lantern.ipa Lantern-unsigned.ipa
+xcodebuild -project Lantern.xcodeproj -scheme Lantern \
+  -sdk iphoneos -configuration Release -derivedDataPath build \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+mkdir -p out/Payload
+cp -R build/Build/Products/Release-iphoneos/Lantern.app out/Payload/
+cd out && zip -qry ../Lantern-unsigned.ipa Payload
 ```
 
 ## 设置项一览
@@ -190,7 +190,6 @@ zsign -k cert.p12 -p 密码 -m profile.mobileprovision \
 - **地点靠系统反查**：`CLGeocoder` 有频率限制，代码里已串行 + 按坐标缓存（约 100m 一档），
   但一次翻很多新地点时会出现「地点晚一两秒才补上」。没有 GPS 坐标的照片（截图、保存的网图）不显示地点。
 - **只认系统解码得动的格式**：交给系统解码，系统不认识就取不到。
-- **TrollStore 之外都要 7 天续签**：这是免费证书的机制，App 本身改不了。
 - **竖屏时 Ken Burns 的锚点是中心**：`zoomIn` 只调幅度不调焦点，脸不在中心时推近会偏。
 
 ## 下一步（想做的）
