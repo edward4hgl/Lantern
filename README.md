@@ -2,7 +2,7 @@
 
 > 把你的共享相簿变成一面自己会换照片的墙。
 
-iPad 立在客厅、店里、婚礼现场、追悼会上，插着电，屏幕不睡。家人往 iCloud 共享相簿里丢一张照片，墙上就多一张 —— 不用同步、不用导出、不用打开任何东西。
+![灯箱在 iPad 上的样子](docs/preview.png)
 
 原生 SwiftUI，iOS 16.6+，无第三方依赖，无账号，无订阅，不联网（除了 iCloud 自己把照片送下来）。
 
@@ -27,39 +27,14 @@ iPad 立在客厅、店里、婚礼现场、追悼会上，插着电，屏幕不
 - **「完整显示」不黑边**：填不满的部分用同一张图高斯模糊垫底。
 - **多窗口**：iPadOS 上可以同时开两个窗口，各播各的相簿（Stage Manager / 分屏）。
 - **按相簿记位置**：关掉再打开，接着上次那张继续。
-- **拍摄日期常显**：左下角一直标着这张是什么时候拍的。
-
-## 和原版的关系
-
-这个 App 是拿 `PictureDisplay`（App Store id 6752118598，`com.DrX.PictureDisplay` v1.0.6）
-的二进制做静态逆向之后重写的。原版已经被 App Store 加密（FairPlay，`cryptid=1`），
-`__TEXT` 整段不可读，能拿到的是**导入符号表** —— 635 个符号完整拼出了它的功能模型：
-SwiftUI + Photos + PhotosUI + AVKit，NavigationStack 选相簿 → 全屏轮播。
-
-灯箱保留了这个骨架，改动集中在「挂墙」这个使用场景上：
-
-| 原版 | 灯箱 |
-| --- | --- |
-| `VideoPlayer`（AVKit SwiftUI 封装）自带控件 | 裸 `AVPlayerLayer`，零控件 |
-| 翻到下一张才开始取图，转到一半先转圈 | `PreloadPipeline` 提前把后面 6 张取完解码完放进自己的 `NSCache`，翻页同步命中，没有转圈 |
-| 视频只预取 `AVPlayerItem`，翻页仍要缓冲 | `VideoWarmPool` 把下一段视频挂进 `AVPlayer` 并 `preroll` 首帧，翻页直接交 layer，`play()` 即出画 |
-| 「播放 X 秒」包含取图时间，设 5 秒实际只看了 3 秒 | 计时器只在画面**真正上屏**后启动（`SlideDeck.generation` + `readyGeneration` 双闸门），加载时间一律不计入 |
-| 照片也有进度条（其实是「第几张」的比例） | 照片不画进度条，位置用左上角「3 / 42」表达；只有视频有真进度条（底部、带圆点、可拖动 seek） |
-| 播视频时左上角变成 AirPlay / 画中画按钮 | `allowsExternalPlayback = false` + `usesExternalPlaybackWhileExternalScreenIsActive = false`，左上角永远是「返回相簿」 |
-| 左上角两种 `a / b` 挤在一起，位置数字看着乱跳 | 左上角只留「第几张 / 共几张」，视频时间挪到进度条两端 |
-| 静帧直接显示 | Ken Burns 推近/拉远 |
-| 时间推进靠 `NSTimer` / `dispatch_after` | `.task(id:)` 结构化并发，改设置/翻页/暂停立刻生效，不会漏 cancel |
-| 相簿列表扁平 | 分节（共享 / 我的 / 智能），空相簿沉底，带封面缩略图 |
-| 设置项少 | 节奏、顺序、素材、填充、压暗、时钟、拍摄日期、视频进度条、记忆位置，全即时生效 |
-| 无拍摄时间提示 | 左下角常显拍摄日期（不受控制条自动隐藏影响） |
-| 无共享相簿变更响应 | 注册 `PHPhotoLibraryChangeObserver`，别人加照片自动进轮播 |
-| 黑边 | 模糊底填充 |
+- **水印**：左下角常显这张的拍摄日期；有 GPS 坐标就在后面加上 📍地点（系统反查，串行且按 100m 缓存）；还能再填一行日期计算，比如按拍摄日期算出「宝宝 2岁3个月」。
 
 ## 目录
 
 ```
 lantern/
 ├── project.yml                     XcodeGen 工程定义（无 .xcodeproj 入库）
+├── docs/preview.png                README 效果图（由 tools/make_preview.py 合成）
 ├── Lantern/
 │   ├── LanternApp.swift            @main，单 WindowGroup（天然多窗口）
 │   ├── RootView.swift              NavigationStack + 值路由
@@ -96,6 +71,8 @@ lantern/
 │       └── SettingsSheet.swift     设置面板 + 画面填充子页
 └── tools/
     ├── make_icon.py                用 numpy 生成图标（可重现）
+    ├── make_preview.py             用 numpy 合成 README 效果图（可重现）
+    ├── publish.py                  没有 git 也能把仓库推到 GitHub 的小脚本
     └── swift_lint.py               无 Xcode 环境下的结构体检
 ```
 
@@ -109,7 +86,7 @@ xcodegen generate
 open Lantern.xcodeproj      # 直接 ⌘R，签名已经配好
 ```
 
-`DEVELOPMENT_TEAM` 已写进 `project.yml`（自用固定 Team），所以重跑 `xcodegen generate` 不丢签名。
+`DEVELOPMENT_TEAM` 填进 `project.yml` 之后，重跑 `xcodegen generate` 也不会丢签名。
 真机三步：iPad 上开「设置 → 隐私与安全性 → 开发者模式」；Xcode 里确认 Automatically manage signing；
 ⌘R。跑起来后在 iPad 的「设置 → 通用 → VPN 与设备管理」里信任一次开发者。
 
@@ -126,23 +103,6 @@ CI 定义在 `.github/workflows/build.yml`；本仓库里同时留了一份同�
    `P12_PASSWORD` / `MOBILEPROVISION_BASE64` 签出 `Lantern-signed.ipa`。
 
 产物在 Actions 页面的 Artifacts 里。
-
-## 装到 iPad
-
-签名和分发这一步不在这儿写。手上有一个可安装的 `Lantern.ipa` 就行——证书怎么来、
-用哪个工具签、装上去之后多久到期，取决于你自己的开发者账号和安装方式。
-
-不签名构建出 ipa：
-
-```bash
-xcodebuild -project Lantern.xcodeproj -scheme Lantern \
-  -sdk iphoneos -configuration Release -derivedDataPath build \
-  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
-
-mkdir -p out/Payload
-cp -R build/Build/Products/Release-iphoneos/Lantern.app out/Payload/
-cd out && zip -qry ../Lantern-unsigned.ipa Payload
-```
 
 ## 设置项一览
 
@@ -197,14 +157,6 @@ cd out && zip -qry ../Lantern-unsigned.ipa Payload
 - **图片落盘**：视频已经有 `HDVideoCache`，照片还是一个 `NSCache`（退出就没了）。
   同理可以按「最近 200 张 / 上限 1 GB」落盘，让第二天打开还是零等待。
 
-## 版本
-
-**V1.0**（自用定稿）—— 相簿列表（共享/我的/智能分节）、全屏轮播、实况照片与视频、
-零等待预取、先糊后清（双层交叉淡化 + 高清落盘留 3 个）、八种切换效果、四类素材各自填充、
-水印（拍摄日期 / 📍地点 / 日期计算）、84pt 时钟、多窗口、按相簿记忆位置。
-
-开发期曾用 1.0.0–1.6.0 逐版迭代，自用定稿统一收为 V1.0。
-
 ## 许可
 
-源码归你。图标由 `tools/make_icon.py` 生成，同样归你。
+源码归你。图标与效果图分别由 `tools/make_icon.py`、`tools/make_preview.py` 生成，同样归你。
